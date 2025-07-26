@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <title>Język na dziś</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #f0f0f0;
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 32px;
+      margin-top: 20px;
+    }
+
+    #selectedLanguage {
+      font-size: 24px;
+      margin: 10px;
+    }
+
+    #timerContainer {
+      font-size: 20px;
+      margin-top: 10px;
+      margin-bottom: 20px;
+      font-weight: bold;
+      display: block;
+    }
+
+    #wheelContainer {
+      position: relative;
+      max-width: 400px;
+      margin: 20px auto;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 6px solid #444;
+      border-radius: 50%;
+      box-sizing: border-box;
+      background-color: #fff;
+    }
+
+    #pointer {
+      position: absolute;
+      top: -20px;
+      left: 50%;
+      transform: translateX(-50%) rotate(180deg);
+      width: 0;
+      height: 0;
+      border-left: 15px solid transparent;
+      border-right: 15px solid transparent;
+      border-bottom: 30px solid red;
+      z-index: 10;
+    }
+
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+      border-radius: 50%;
+      display: none;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      font-size: 22px;
+      z-index: 9;
+    }
+
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin: 10px;
+    }
+
+    @media (max-width: 500px) {
+      h1 {
+        font-size: 24px;
+      }
+      button {
+        font-size: 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>Język na dziś:</h1>
+  <div id="selectedLanguage">–</div>
+  <div id="timerContainer">–</div>
+
+  <div id="wheelContainer">
+    <div id="pointer"></div>
+    <canvas id="wheelCanvas" width="400" height="400"></canvas>
+    <div id="overlay">Zakręć jutro!</div>
+  </div>
+
+  <button id="spinBtn">🎯 Zakręć</button>
+  <button id="resetBtn">🔄 Reset (testowy)</button>
+
+  <audio id="tickSound" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_01d7fdc0ae.mp3?filename=mechanical-click-124465.mp3" preload="auto"></audio>
+
+  <script>
+    const canvas = document.getElementById('wheelCanvas');
+    const ctx = canvas.getContext('2d');
+    const spinBtn = document.getElementById('spinBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const selectedLanguage = document.getElementById("selectedLanguage");
+    const overlay = document.getElementById("overlay");
+    const timerContainer = document.getElementById("timerContainer");
+    const pointer = document.getElementById("pointer");
+    const tickSound = document.getElementById("tickSound");
+
+    const segments = 20;
+    const anglePerSegment = 2 * Math.PI / segments;
+    const colors = ['#ffcccb', '#add8e6'];
+    const labels = ['Polski', 'Angielski'];
+
+    let currentRotation = 0;
+    let isSpinning = false;
+    const spinDuration = 6000;
+
+    function drawWheel(rotation = 0) {
+      const size = canvas.width;
+      ctx.clearRect(0, 0, size, size);
+      const radius = size / 2;
+      const cx = radius, cy = radius;
+
+      for (let i = 0; i < segments; i++) {
+        const angle = i * anglePerSegment + rotation;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.fillStyle = colors[i % 2];
+        ctx.arc(cx, cy, radius, angle, angle + anglePerSegment);
+        ctx.lineTo(cx, cy);
+        ctx.fill();
+
+        // Napisy
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle + anglePerSegment / 2);
+        ctx.textAlign = "right";
+        ctx.fillStyle = "#000";
+        ctx.font = "bold 14px Arial";
+        ctx.fillText(labels[i % 2], radius - 10, 5);
+        ctx.restore();
+      }
+    }
+
+    function getRemainingTime(ts) {
+      const now = Date.now();
+      const diff = ts - now;
+      if (diff <= 0) return null;
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      return { h, m, s };
+    }
+
+    let countdownInterval = null;
+    function startCountdown(ts) {
+      overlay.style.display = "flex";
+      if (countdownInterval) clearInterval(countdownInterval);
+      countdownInterval = setInterval(() => {
+        const rem = getRemainingTime(ts);
+        if (rem) {
+          timerContainer.textContent = `Odblokuj za: ${rem.h}h ${rem.m}m ${rem.s}s`;
+        } else {
+          clearInterval(countdownInterval);
+          overlay.style.display = "none";
+          spinBtn.disabled = false;
+          selectedLanguage.textContent = '–';
+          timerContainer.textContent = '–';
+          localStorage.removeItem("lastSpin");
+          localStorage.removeItem("lastIndex");
+        }
+      }, 1000);
+    }
+
+    function spinWheel() {
+      if (isSpinning) return;
+      isSpinning = true;
+
+      const extraSpins = 6;
+      const targetAngle = Math.random() * 2 * Math.PI;
+      const totalRotation = 2 * Math.PI * extraSpins + targetAngle;
+      const startRotation = currentRotation;
+      const startTime = performance.now();
+      let lastTick = -1;
+
+      function animate(now) {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / spinDuration, 1);
+        const eased = 1 - Math.pow(1 - t, 3);
+        const rotation = startRotation + totalRotation * eased;
+        currentRotation = rotation % (2 * Math.PI);
+        drawWheel(currentRotation);
+
+        const tickIndex = Math.floor(currentRotation / anglePerSegment);
+        if (tickIndex !== lastTick) {
+          tickSound.currentTime = 0;
+          tickSound.play();
+          lastTick = tickIndex;
+          pointer.style.transform = "translateX(-50%) rotate(178deg)";
+          setTimeout(() => pointer.style.transform = "translateX(-50%) rotate(180deg)", 80);
+        }
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          const normalizedAngle = (2 * Math.PI - currentRotation) % (2 * Math.PI);
+          const index = Math.floor((normalizedAngle + anglePerSegment / 2) / anglePerSegment) % segments;
+
+          selectedLanguage.textContent = labels[index % 2];
+
+          const nextSpin = Date.now() + 24 * 60 * 60 * 1000;
+          localStorage.setItem("lastSpin", nextSpin.toString());
+          localStorage.setItem("lastIndex", index.toString());
+          startCountdown(nextSpin);
+
+          spinBtn.disabled = true;
+          isSpinning = false;
+        }
+      }
+
+      requestAnimationFrame(animate);
+    }
+
+    drawWheel();
+
+    const savedTime = parseInt(localStorage.getItem("lastSpin"));
+    const savedIndex = parseInt(localStorage.getItem("lastIndex"));
+    if (savedTime && Date.now() < savedTime) {
+      spinBtn.disabled = true;
+      selectedLanguage.textContent = labels[savedIndex % 2];
+      startCountdown(savedTime);
+    } else {
+      timerContainer.textContent = '–';
+    }
+
+    spinBtn.addEventListener("click", spinWheel);
+    resetBtn.addEventListener("click", () => {
+      clearInterval(countdownInterval);
+      overlay.style.display = "none";
+      spinBtn.disabled = false;
+      selectedLanguage.textContent = "–";
+      timerContainer.textContent = '–';
+      localStorage.removeItem("lastSpin");
+      localStorage.removeItem("lastIndex");
+      drawWheel();
+    });
+
+    window.addEventListener('resize', () => drawWheel(currentRotation));
+  </script>
+</body>
+</html>
